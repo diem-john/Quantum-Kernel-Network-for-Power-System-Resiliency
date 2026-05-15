@@ -30,6 +30,7 @@ def convert_df_to_csv(df):
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Q-Rating Chaos", layout="wide")
 st.title("⚡ Q-Rating Chaos: A Tri-Partite Quantum Framework for Typhoon Modeling and Microgrid Resilience")
+st.subheader("ⓒ Engr. D.J. Medina 2026")
 st.markdown(
     "Interactive POC: Quantum Kernel Networks, Conformal Prediction, and Quantum Walks for Typhoon Risk Modeling in Chiayi, Taiwan.")
 
