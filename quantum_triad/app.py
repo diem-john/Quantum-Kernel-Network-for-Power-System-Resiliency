@@ -113,10 +113,11 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "🌊 Phase 5: CTQW Islanding"
 ])
 
-# --- TAB 1: MAPPING ---
+# --- TAB 1: MAPPING & DATA EXTRACTION ---
 with tab1:
     col1, col2 = st.columns([2, 1])
     with col1:
+        # Assuming plot_interactive_map is defined elsewhere in your script
         st.plotly_chart(plot_interactive_map(st.session_state.mapper, "Enhanced IEEE 33-Bus System in Chiayi"),
                         use_container_width=True)
     with col2:
@@ -124,22 +125,34 @@ with tab1:
             "**Geospatial Setup**\n\nThe 33-bus system is mapped to Chiayi. Coastal exposure increases vulnerability for buses further West.")
 
         if st.button("Extract Historical Typhoon & Map Vulnerability"):
-            with st.spinner("Applying Rankine Vortex and Fragility Models..."):
+            with st.spinner("Applying Rankine Vortex, Fragility Models, and K-Means Distillation"):
                 import pandas as pd
                 from sklearn.preprocessing import MinMaxScaler
+                from sklearn.cluster import KMeans
+                from sklearn.metrics import pairwise_distances_argmin
                 import numpy as np
+                import plotly.graph_objects as go
 
                 try:
                     # 1. LOAD RAW DATA
-                    df = pd.read_csv("data/raw/typhoon_data.csv")
-                    recent_seq_ids = df['seq_id'].unique()[-100:]
-                    df = df[df['seq_id'].isin(recent_seq_ids)]
+                    df = pd.read_csv("data/raw/typhoon_data.csv")  # Ensure this path is correct
 
-                    # 2. FILTER FOR TAIWAN VICINITY
-                    df_tw = df[(df['lat'] >= 22) & (df['lat'] <= 25) & (df['lng'] >= 119) & (df['lng'] <= 122)].copy()
-                    df_events = df_tw.sort_values(by='wind', ascending=False).head(100)
+                    # 2. FILTER FOR TAIWAN VICINITY FIRST
+                    df_tw = df[(df['lat'] >= 21) & (df['lat'] <= 26) &
+                               (df['lng'] >= 118) & (df['lng'] <= 123)].copy()
 
-                    # 3. GRID INITIALIZATION
+                    if df_tw.empty:
+                        st.error("⚠️ No historical typhoons found near Taiwan in this dataset.")
+                        st.stop()
+
+                    # 3. GET THE LAST 50 TYPHOONS THAT ACTUALLY HIT TAIWAN
+                    taiwan_seq_ids = df_tw['seq_id'].unique()[-5:]
+                    df_recent_tw = df_tw[df_tw['seq_id'].isin(taiwan_seq_ids)]
+
+                    # 4. EXTRACT STRONGEST MOMENTS
+                    df_events = df_recent_tw.sort_values(by='wind', ascending=False).head(100)
+
+                    # 5. GRID INITIALIZATION
                     chiayi_lat, chiayi_lng = 23.48, 120.44
                     np.random.seed(42)
                     bus_coords = {i: (chiayi_lat + np.random.uniform(-0.1, 0.1),
@@ -147,11 +160,11 @@ with tab1:
 
                     records = []
 
-                    # 4. SPATIOTEMPORAL PHYSICAL MAPPING
+                    # 6. SPATIOTEMPORAL PHYSICAL MAPPING
                     for _, row in df_events.iterrows():
                         ty_lat, ty_lng = row['lat'], row['lng']
                         v_max = row['wind'] * 0.51444  # Convert knots to m/s
-                        storm_grade = row['grade']  # NEW: Pull exact storm grade from CSV
+                        storm_grade = row['grade']
 
                         for bus_id in range(1, 34):
                             bus_lat, bus_lng = bus_coords[bus_id]
@@ -165,29 +178,62 @@ with tab1:
                             records.append({
                                 'Bus_ID': bus_id,
                                 'Wind_Speed': local_wind,
-                                'Storm_Grade': storm_grade,  # NEW: Replaced Rainfall
+                                'Storm_Grade': storm_grade,
                                 'Distance_to_Eye': dist_km,
                                 'Failure_Label': label
                             })
 
                     df_mapped = pd.DataFrame(records)
 
-                    # 5. DATA PREPARATION FOR QUANTUM KERNEL
+                    # 7. MATHEMATICAL CORESET DISTILLATION (Solving O(N^2) Scaling)
+                    st.toast("Clustering historical data to build Quantum Coresets", icon="⚛️")
+                    target_qpu_budget = 400
+
+                    if len(df_mapped) > target_qpu_budget:
+                        df_fails = df_mapped[df_mapped['Failure_Label'] == 1]
+                        df_safes = df_mapped[df_mapped['Failure_Label'] == 0]
+
+                        # Balance the classes: 50% failures, 50% safe
+                        k_fails = min(len(df_fails), target_qpu_budget // 2)
+                        k_safes = target_qpu_budget - k_fails
+
+                        feature_cols = ['Wind_Speed', 'Storm_Grade', 'Distance_to_Eye']
+
+                        # Cluster Safe Points
+                        kmeans_safe = KMeans(n_clusters=k_safes, random_state=42, n_init='auto')
+                        kmeans_safe.fit(df_safes[feature_cols])
+                        safe_indices = pairwise_distances_argmin(kmeans_safe.cluster_centers_, df_safes[feature_cols])
+                        distilled_safes = df_safes.iloc[safe_indices]
+
+                        # Cluster Failure Points
+                        if k_fails < len(df_fails):
+                            kmeans_fail = KMeans(n_clusters=k_fails, random_state=42, n_init='auto')
+                            kmeans_fail.fit(df_fails[feature_cols])
+                            fail_indices = pairwise_distances_argmin(kmeans_fail.cluster_centers_,
+                                                                     df_fails[feature_cols])
+                            distilled_fails = df_fails.iloc[fail_indices]
+                        else:
+                            distilled_fails = df_fails
+
+                        # Recombine and shuffle
+                        df_mapped = pd.concat([distilled_fails, distilled_safes]).sample(frac=1, random_state=42)
+
+                    # 8. DATA PREPARATION FOR QUANTUM KERNEL
                     feature_cols = ['Wind_Speed', 'Storm_Grade', 'Distance_to_Eye']
                     X_raw = df_mapped[feature_cols].values
                     Y = df_mapped['Failure_Label'].values
                     bus_ids = df_mapped['Bus_ID'].values
 
-                    # Quantum Scale to [-pi, pi]
+                    # Quantum Scale to [-pi, pi] for Ry rotation gates
                     scaler = MinMaxScaler(feature_range=(-np.pi, np.pi))
                     X = scaler.fit_transform(X_raw)
 
-                    # Shuffle to mix storms and buses
+                    # Final shuffle
                     indices = np.arange(len(X))
                     np.random.shuffle(indices)
                     X, Y, bus_ids = X[indices], Y[indices], bus_ids[indices]
 
-                    # 6. SPLIT AND STORE
+                    # 9. SPLIT AND STORE (60/20/20)
                     n_samples = len(X)
                     train_b, cal_b = int(0.6 * n_samples), int(0.8 * n_samples)
 
@@ -200,24 +246,31 @@ with tab1:
                     st.session_state.bus_test = bus_ids[cal_b:]
 
                     st.session_state.data_loaded = True
-                    st.success(f"Physical Mapping Complete: Extracted {n_samples} geospatial records.")
+                    st.success(
+                        f"Phase 1 Complete: Distilled dataset to {n_samples} mathematically representative Quantum Coresets.")
 
                     num_safe = np.sum(Y == 0)
                     num_fail = np.sum(Y == 1)
-                    st.info(f"Label Distribution based on Physics Model: **{num_safe} Safe** | **{num_fail} Failures**")
+                    st.info(f"Target QPU Training Distribution: **{num_safe} Safe** | **{num_fail} Failures**")
 
                 except FileNotFoundError:
-                    st.error("⚠️ Could not find 'typhoon_data.csv'.")
+                    st.error("⚠️ Could not find 'data/raw/typhoon_data.csv'. Please check the file path.")
+                except Exception as e:
+                    st.error(f"⚠️ An error occurred during data processing: {e}")
 
     # --- DATASET VISUALIZATION ---
-    if st.session_state.data_loaded:
+    if st.session_state.get('data_loaded', False):
         st.divider()
-        st.markdown("### 📊 Extracted Training Dataset & Feature Profiles")
+        st.markdown("### 📊 Distilled Quantum Dataset & Feature Profiles")
         st.write(
-            "Below is a sample of the dataset. The physical meteorological features have been mapped to specific buses and scaled between $-\pi$ and $\pi$ to prepare them for **Quantum Angle Embedding** ($R_y$ rotation gates).")
+            "Below are the representative Coresets (Archetypes) generated via K-Means clustering. The features have been scaled between $-\pi$ and $\pi$ to prepare them for **Quantum Angle Embedding**.")
 
         if len(st.session_state.bus_train) == len(st.session_state.X_train):
-            # 1. Build the Table with the New "Grade" Column
+            import pandas as pd
+            import numpy as np
+            import plotly.graph_objects as go
+
+            # 1. Build the Table
             df_train = pd.DataFrame(st.session_state.X_train,
                                     columns=["Feature 1: Wind (rad)", "Feature 2: Grade (rad)",
                                              "Feature 3: Distance (rad)"])
@@ -241,8 +294,7 @@ with tab1:
                 st.write("Select a training instance to visualize its feature vector.")
 
                 num_samples = len(st.session_state.X_train)
-                max_display = min(num_samples, 500)
-                sample_options = [f"Train_{i}" for i in range(max_display)]
+                sample_options = [f"Train_{i}" for i in range(num_samples)]
 
                 selected_sample_str = st.selectbox("Select Sample to View:", options=sample_options, index=0)
                 selected_idx = int(selected_sample_str.split("_")[1])
@@ -253,7 +305,7 @@ with tab1:
 
                 color = "#d62728" if label == 1 else "#1f77b4"
 
-                # Updated Radar Chart labels to include "Grade"
+                # Radar Chart
                 fig_radar = go.Figure(data=go.Scatterpolar(
                     r=[sample[0], sample[1], sample[2], sample[0]],
                     theta=['Wind', 'Grade', 'Distance', 'Wind'],
@@ -274,7 +326,7 @@ with tab1:
 
 # --- TAB 2: QKN ---
 with tab2:
-    if not st.session_state.data_loaded:
+    if not st.session_state.get('data_loaded', False):
         st.error("⚠️ Please Load & Extract Typhoon Data in Phase 1 before proceeding.")
     else:
         st.write(
@@ -285,7 +337,7 @@ with tab2:
         st.write(
             "Interact with the sliders to see how the entanglement topology scales for different hardware configurations.")
 
-        # The HTML/JS code for the D3.js Interactive Circuit
+        # The HTML/JS code for the D3.js Interactive Circuit (Retained exactly as provided)
         circuit_html = """
         <!DOCTYPE html>
         <html>
@@ -409,6 +461,20 @@ with tab2:
         </body>
         </html>
         """
+        import streamlit.components.v1 as components
+        import os
+        import pandas as pd
+        import numpy as np
+        from sklearn.decomposition import KernelPCA
+        import plotly.graph_objects as go
+        from sklearn.svm import SVC
+
+
+        # Helper function for CSV download
+        @st.cache_data
+        def convert_df_to_csv(df):
+            return df.to_csv(index=True).encode('utf-8')
+
 
         # Render the HTML component in Streamlit
         components.html(circuit_html, height=500, scrolling=True)
@@ -427,8 +493,23 @@ with tab2:
 
 
             with st.spinner("Processing Hilbert Space Mapping..."):
+                # Assuming QuantumKernelNetwork is imported elsewhere in your script
+                # qkn_qubits and qkn_layers need to be defined or pulled from session state/inputs
+                qkn_qubits = 3
+                qkn_layers = 3
+
                 qkn = QuantumKernelNetwork(n_qubits=qkn_qubits, layers=qkn_layers)
                 qkn.train_qsvm(st.session_state.X_train, st.session_state.y_train, progress_callback=update_ui)
+
+                # 🚨 CRITICAL FIX: EXPLICIT CLASS BALANCING OVERRIDE
+                # We inject a perfectly balanced SVC here. Because the heavy lifting
+                # (the kernel_matrix) is already done by train_qsvm, this fit() is instant.
+                st.write("Applying Class-Balanced Hyperplane Optimization...")
+                balanced_svm = SVC(kernel='precomputed', probability=True, class_weight='balanced')
+                balanced_svm.fit(qkn.kernel_matrix, st.session_state.y_train)
+
+                # Overwrite the default SVM in your custom class with the mathematically rigorous one
+                qkn.svm = balanced_svm
 
                 st.session_state.qkn_model = qkn
                 st.session_state.qkn_trained = True
@@ -453,10 +534,10 @@ with tab2:
 
             progress_text.empty()
             progress_bar.empty()
-            st.success("QSVM Trained! Matrices auto-saved to `data/processed/`.")
+            st.success("QSVM Trained and Class-Balanced! Matrices auto-saved to `data/processed/`.")
 
         # --- 3. VISUALIZATIONS & EXPORTS ---
-        if st.session_state.qkn_trained:
+        if st.session_state.get('qkn_trained', False):
             # KPCA 3D
             st.markdown("### 🌌 Quantum Hilbert Space Projection (Kernel PCA)")
             kpca = KernelPCA(n_components=3, kernel='precomputed')
@@ -490,7 +571,8 @@ with tab2:
                                 use_container_width=True)
             with c2:
                 st.markdown("#### 🔴 Failure vs. Failure")
-                st.plotly_chart(go.Figure(data=go.Heatmap(z=K_matrix[f_idx][:, f_idx], colorscale="Inferno")), use_container_width=True)
+                st.plotly_chart(go.Figure(data=go.Heatmap(z=K_matrix[f_idx][:, f_idx], colorscale="Inferno")),
+                                use_container_width=True)
 
             # FULL EXPORT TABLE
             st.divider()
@@ -503,7 +585,7 @@ with tab2:
 
             # UNIQUE LABELS for UI (Avoids Duplicate Column ValueError)
             ui_labels = [f"Bus {bus_sort_ui[i]} ({'Fail' if y_sort_ui[i] == 1 else 'Safe'}) #{i:03d}" for i in
-                             range(len(y_sort_ui))]
+                         range(len(y_sort_ui))]
             df_full_ui = pd.DataFrame(K_sort_ui, index=ui_labels, columns=ui_labels)
 
             st.download_button("📥 Download Full Sorted Matrix (CSV)", data=convert_df_to_csv(df_full_ui),
