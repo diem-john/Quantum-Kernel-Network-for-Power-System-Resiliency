@@ -132,7 +132,7 @@ with tab1:
                 try:
                     # 1. LOAD RAW DATA
                     df = pd.read_csv("data/raw/typhoon_data.csv")
-                    recent_seq_ids = df['seq_id'].unique()[-50:]
+                    recent_seq_ids = df['seq_id'].unique()[-100:]
                     df = df[df['seq_id'].isin(recent_seq_ids)]
 
                     # 2. FILTER FOR TAIWAN VICINITY
