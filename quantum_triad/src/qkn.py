@@ -1,6 +1,7 @@
 import pennylane as qml
 import numpy as np
 from sklearn.svm import SVC
+from tqdm import tqdm  # Added for terminal progress tracking
 
 
 class QuantumKernelNetwork:
@@ -11,12 +12,17 @@ class QuantumKernelNetwork:
         self.layers = layers
         self.dev = qml.device("default.qubit", wires=self.n_qubits)
 
+        # 🚨 CRITICAL FIX: Initialize static weights ONCE.
+        # This ensures the adjoint circuit matches the forward circuit exactly,
+        # preserving the symmetry and mathematical validity of the Gram matrix.
+        np.random.seed(42)  # Ensures reproducibility across runs
+        self.weights = np.random.uniform(0, 2 * np.pi, (self.layers, self.n_qubits, 3))
+
     def feature_map(self, x):
         """Hardware-efficient angle embedding with entangling layers."""
         qml.AngleEmbedding(x[:self.n_qubits], wires=range(self.n_qubits), rotation='Y')
-        for _ in range(self.layers):
-            qml.StronglyEntanglingLayers(weights=np.random.uniform(0, 2 * np.pi, (1, self.n_qubits, 3)),
-                                         wires=range(self.n_qubits))
+        # Use the static weights initialized in __init__
+        qml.StronglyEntanglingLayers(weights=self.weights, wires=range(self.n_qubits))
 
     def kernel_circuit(self, x1, x2):
         """Computes the transition amplitude (fidelity) between two encoded states."""
@@ -40,8 +46,15 @@ class QuantumKernelNetwork:
         step = 0
         throttle_rate = max(1, total_steps // 100)  # Update UI roughly every 1%
 
-        for i, x1 in enumerate(X1):
-            for j, x2 in enumerate(X2):
+        print(f"\n⚛️ Starting Quantum Circuit Simulation: {len(X1)}x{len(X2)} Matrix")
+
+        # 🚨 NEW: tqdm wrapper for terminal visibility
+        # This will show a live progress bar in your command prompt/terminal
+        for i in tqdm(range(len(X1)), desc="Hilbert Space Mapping", unit="row"):
+            x1 = X1[i]
+            for j in range(len(X2)):
+                x2 = X2[j]
+
                 # Probability of measuring the zero state |0...0>
                 matrix[i, j] = q_kernel(x1, x2)[0]
 
@@ -60,6 +73,8 @@ class QuantumKernelNetwork:
         # Pass the callback down to the matrix generator
         self.kernel_matrix = self.compute_kernel_matrix(X_train, X_train, progress_callback)
 
-        self.svm = SVC(kernel='precomputed', probability=True)
+        # 🚨 NEW: Moved the Class Balancing logic natively into the backend.
+        # This keeps the Streamlit app clean and guarantees the model protects against rare failures.
+        self.svm = SVC(kernel='precomputed', probability=True, class_weight='balanced')
         self.svm.fit(self.kernel_matrix, y_train)
         return self.svm

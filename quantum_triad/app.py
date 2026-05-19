@@ -146,7 +146,7 @@ with tab1:
                         st.stop()
 
                     # 3. GET THE LAST 50 TYPHOONS THAT ACTUALLY HIT TAIWAN
-                    taiwan_seq_ids = df_tw['seq_id'].unique()[-5:]
+                    taiwan_seq_ids = df_tw['seq_id'].unique()[-1:]
                     df_recent_tw = df_tw[df_tw['seq_id'].isin(taiwan_seq_ids)]
 
                     # 4. EXTRACT STRONGEST MOMENTS
@@ -482,39 +482,33 @@ with tab2:
 
         # --- 2. TRAINING SECTION ---
         if st.button("Train Quantum Model (QSVM)"):
+            # Setup Streamlit UI placeholders
             progress_text = st.empty()
             progress_bar = st.progress(0)
 
 
+            # Callback that passes backend progress to the frontend UI
             def update_ui(progress_fraction):
                 clamped_fraction = max(0.0, min(1.0, progress_fraction))
                 progress_bar.progress(clamped_fraction)
-                progress_text.text(f"Evaluating Quantum Fidelity... {int(clamped_fraction * 100)}%")
+                progress_text.text(f"⚛️ Quantum Matrix Computation: {int(clamped_fraction * 100)}%")
 
 
-            with st.spinner("Processing Hilbert Space Mapping..."):
-                # Assuming QuantumKernelNetwork is imported elsewhere in your script
-                # qkn_qubits and qkn_layers need to be defined or pulled from session state/inputs
-                qkn_qubits = 3
-                qkn_layers = 3
-
+            # Step 1: Initialization (Instants)
+            with st.spinner("Initializing 3-Qubit Hardware-Efficient Ansatz..."):
                 qkn = QuantumKernelNetwork(n_qubits=qkn_qubits, layers=qkn_layers)
-                qkn.train_qsvm(st.session_state.X_train, st.session_state.y_train, progress_callback=update_ui)
 
-                # 🚨 CRITICAL FIX: EXPLICIT CLASS BALANCING OVERRIDE
-                # We inject a perfectly balanced SVC here. Because the heavy lifting
-                # (the kernel_matrix) is already done by train_qsvm, this fit() is instant.
-                st.write("Applying Class-Balanced Hyperplane Optimization...")
-                balanced_svm = SVC(kernel='precomputed', probability=True, class_weight='balanced')
-                balanced_svm.fit(qkn.kernel_matrix, st.session_state.y_train)
+            # Step 2: The Heavy Lifting
+            # Notice there is no st.spinner here! We let the progress bar be the sole indicator
+            # so they don't fight each other visually.
+            qkn.train_qsvm(st.session_state.X_train, st.session_state.y_train, progress_callback=update_ui)
 
-                # Overwrite the default SVM in your custom class with the mathematically rigorous one
-                qkn.svm = balanced_svm
+            # Save to Session State
+            st.session_state.qkn_model = qkn
+            st.session_state.qkn_trained = True
 
-                st.session_state.qkn_model = qkn
-                st.session_state.qkn_trained = True
-
-                # SAVE Logic
+            # Step 3: SAVE Logic
+            with st.spinner("Saving Quantum Matrices to disk..."):
                 os.makedirs("data/processed", exist_ok=True)
                 y_labels = st.session_state.y_train
                 bus_labels = st.session_state.bus_train
@@ -525,16 +519,16 @@ with tab2:
                 y_sorted = y_labels[sort_indices]
                 bus_sorted = bus_labels[sort_indices]
 
-                # UNIQUE LABELS for Save (Avoids Duplicate Index issues)
+                # UNIQUE LABELS for Save
                 full_labels_save = [f"Bus {bus_sorted[i]} ({'Fail' if y_sorted[i] == 1 else 'Safe'}) #{i:03d}" for i in
                                     range(len(y_sorted))]
-
                 df_full = pd.DataFrame(K_sorted, index=full_labels_save, columns=full_labels_save)
                 df_full.to_csv("data/processed/qkn_full_matrix.csv")
 
+            # Clean up the UI bars and show success
             progress_text.empty()
             progress_bar.empty()
-            st.success("QSVM Trained and Class-Balanced! Matrices auto-saved to `data/processed/`.")
+            st.success("✅ QSVM Trained and Class-Balanced! Matrices auto-saved to `data/processed/`.")
 
         # --- 3. VISUALIZATIONS & EXPORTS ---
         if st.session_state.get('qkn_trained', False):
