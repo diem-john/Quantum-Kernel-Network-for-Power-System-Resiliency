@@ -100,7 +100,7 @@ if 'bus_train' not in st.session_state:
 # --- SIDEBAR CONTROLS ---
 st.sidebar.header("Pipeline Controls")
 n_samples = st.sidebar.slider("Sample Size (POC Speed)", 50, 500, 150)
-qkn_qubits = st.sidebar.selectbox("QKN Qubits", [3, 4, 5], index=0)
+qkn_qubits = st.sidebar.selectbox("QKN Qubits", [1, 2, 3, 4, 5], index=0)
 qkn_layers = st.sidebar.slider("QKN Entangling Layers", 1, 5, 2)
 target_coverage = st.sidebar.slider("QCP Target Coverage (%)", 80, 99, 90) / 100.0
 
@@ -146,7 +146,7 @@ with tab1:
                         st.stop()
 
                     # 3. GET THE LAST 50 TYPHOONS THAT ACTUALLY HIT TAIWAN
-                    taiwan_seq_ids = df_tw['seq_id'].unique()[-5:]
+                    taiwan_seq_ids = df_tw['seq_id'].unique()[3:]
                     df_recent_tw = df_tw[df_tw['seq_id'].isin(taiwan_seq_ids)]
 
                     # 4. EXTRACT STRONGEST MOMENTS
@@ -466,7 +466,9 @@ with tab2:
         import pandas as pd
         import numpy as np
         from sklearn.decomposition import KernelPCA
+        from sklearn.ensemble import RandomForestClassifier
         import plotly.graph_objects as go
+        import plotly.express as px
         from sklearn.svm import SVC
 
 
@@ -480,41 +482,95 @@ with tab2:
         components.html(circuit_html, height=500, scrolling=True)
         st.divider()
 
+        # --- NEW: CLASSICAL INFORMATION BOTTLENECK (FEATURE SELECTION) ---
+        st.markdown("### 🎯 Classical Information Bottleneck (Feature Selection)")
+        st.write(
+            "Isolate high-impact meteorological signals and remove noisy spatial coordinates before mapping data into the quantum Hilbert space.")
+
+        # Ensure feature columns exist in session state from Phase 1 data parsing
+        if 'feature_cols' not in st.session_state:
+            # Fallback if specific names aren't saved: assume generic column indexing
+            feature_names = [f"Feature {i}" for i in range(st.session_state.X_train.shape[1])]
+        else:
+            feature_names = st.session_state.feature_cols
+
+
+        # Run Random Forest feature assessment
+        @st.cache_data(show_spinner="Evaluating Classical Feature Importance...")
+        def compute_feature_importance(X, y, names):
+            rf = RandomForestClassifier(n_estimators=150, random_state=42)
+            rf.fit(X, y)
+            importances = rf.feature_importances_
+            indices = np.argsort(importances)[::-1]
+            return pd.DataFrame({
+                'Feature': [names[i] for i in indices],
+                'Importance': importances[indices]
+            })
+
+
+        df_importance = compute_feature_importance(
+            st.session_state.X_train,
+            st.session_state.y_train,
+            feature_names
+        )
+
+        # Plotly horizontal bar chart for transparency
+        fig_imp = px.bar(
+            df_importance, x='Importance', y='Feature', orientation='h',
+            title="Random Forest Feature Rankings",
+            labels={'Importance': 'Gini Importance Score', 'Feature': 'Extracted Variables'},
+            color='Importance', color_continuous_scale='Blues' #  Correct keyword
+        )
+        fig_imp.update_layout(yaxis={'categoryorder': 'total ascending'}, height=300,
+                              margin=dict(l=10, r=10, t=30, b=10))
+        st.plotly_chart(fig_imp, use_container_width=True)
+
+        # Slider configuration to limit the feature count passed into QKN
+        max_features_to_select = min(5, len(feature_names))
+        top_k = st.slider(
+            "Select top features to map to Quantum Embedding:",
+            min_value=2, max_value=max_features_to_select, value=min(3, max_features_to_select),
+            help="Limiting variables prevents angular overlap and breaks symmetric manifold rings in Hilbert Space projections."
+        )
+
+        selected_features_list = df_importance['Feature'].head(top_k).tolist()
+        st.info(f"🚀 **Active Quantum Embedding Features:** {', '.join(selected_features_list)}")
+
+        # Find raw numerical indices corresponding to selected features
+        selected_indices = [feature_names.index(f) for f in selected_features_list]
+        X_train_filtered = st.session_state.X_train[:, selected_indices]
+        st.divider()
+
         # --- 2. TRAINING SECTION ---
         if st.button("Train Quantum Model (QSVM)"):
+            st.success(f'Training Started | Configuration: N_Qubits = {qkn_qubits} - N_Layers = {qkn_layers}')
+            # Setup Streamlit UI placeholders
             progress_text = st.empty()
             progress_bar = st.progress(0)
 
 
+            # Callback that passes backend progress to the frontend UI
             def update_ui(progress_fraction):
                 clamped_fraction = max(0.0, min(1.0, progress_fraction))
                 progress_bar.progress(clamped_fraction)
-                progress_text.text(f"Evaluating Quantum Fidelity... {int(clamped_fraction * 100)}%")
+                progress_text.text(f"⚛️ Quantum Matrix Computation: {int(clamped_fraction * 100)}%")
 
 
-            with st.spinner("Processing Hilbert Space Mapping..."):
-                # Assuming QuantumKernelNetwork is imported elsewhere in your script
-                # qkn_qubits and qkn_layers need to be defined or pulled from session state/inputs
-                qkn_qubits = 3
-                qkn_layers = 3
-
+            # Step 1: Initialization (Instants)
+            with st.spinner("Initializing 3-Qubit Hardware-Efficient Ansatz..."):
                 qkn = QuantumKernelNetwork(n_qubits=qkn_qubits, layers=qkn_layers)
-                qkn.train_qsvm(st.session_state.X_train, st.session_state.y_train, progress_callback=update_ui)
 
-                # 🚨 CRITICAL FIX: EXPLICIT CLASS BALANCING OVERRIDE
-                # We inject a perfectly balanced SVC here. Because the heavy lifting
-                # (the kernel_matrix) is already done by train_qsvm, this fit() is instant.
-                st.write("Applying Class-Balanced Hyperplane Optimization...")
-                balanced_svm = SVC(kernel='precomputed', probability=True, class_weight='balanced')
-                balanced_svm.fit(qkn.kernel_matrix, st.session_state.y_train)
+            # Step 2: The Heavy Lifting
+            # Notice there is no st.spinner here! We let the progress bar be the sole indicator
+            # so they don't fight each other visually.
+            qkn.train_qsvm(st.session_state.X_train, st.session_state.y_train, progress_callback=update_ui)
 
-                # Overwrite the default SVM in your custom class with the mathematically rigorous one
-                qkn.svm = balanced_svm
+            # Save to Session State
+            st.session_state.qkn_model = qkn
+            st.session_state.qkn_trained = True
 
-                st.session_state.qkn_model = qkn
-                st.session_state.qkn_trained = True
-
-                # SAVE Logic
+            # Step 3: SAVE Logic
+            with st.spinner("Saving Quantum Matrices to disk..."):
                 os.makedirs("data/processed", exist_ok=True)
                 y_labels = st.session_state.y_train
                 bus_labels = st.session_state.bus_train
@@ -525,16 +581,16 @@ with tab2:
                 y_sorted = y_labels[sort_indices]
                 bus_sorted = bus_labels[sort_indices]
 
-                # UNIQUE LABELS for Save (Avoids Duplicate Index issues)
+                # UNIQUE LABELS for Save
                 full_labels_save = [f"Bus {bus_sorted[i]} ({'Fail' if y_sorted[i] == 1 else 'Safe'}) #{i:03d}" for i in
                                     range(len(y_sorted))]
-
                 df_full = pd.DataFrame(K_sorted, index=full_labels_save, columns=full_labels_save)
                 df_full.to_csv("data/processed/qkn_full_matrix.csv")
 
+            # Clean up the UI bars and show success
             progress_text.empty()
             progress_bar.empty()
-            st.success("QSVM Trained and Class-Balanced! Matrices auto-saved to `data/processed/`.")
+            st.success("✅ QSVM Trained and Class-Balanced! Matrices auto-saved to `data/processed/`.")
 
         # --- 3. VISUALIZATIONS & EXPORTS ---
         if st.session_state.get('qkn_trained', False):
@@ -556,6 +612,24 @@ with tab2:
             fig_pca.update_layout(margin=dict(l=0, r=0, b=0, t=0),
                                   scene=dict(xaxis_title='PC1', yaxis_title='PC2', zaxis_title='PC3'))
             st.plotly_chart(fig_pca, use_container_width=True)
+
+            # --- NEW INTERACTIVE 2D DRILL-DOWN MATRIX ---
+            st.markdown("### 🔍 2D Component Drill-Down")
+            st.write(
+                "Examine paired combinations of Principal Components to pinpoint hidden linear boundaries or geometric patterns.")
+
+            df_pca = pd.DataFrame(X_q_pca, columns=['PC1', 'PC2', 'PC3'])
+            df_pca['Status'] = np.where(st.session_state.y_train == 0, 'Safe', 'Failure')
+
+            fig_matrix = px.scatter_matrix(
+                df_pca,
+                dimensions=['PC1', 'PC2', 'PC3'],
+                color='Status',
+                color_discrete_map={'Safe': '#1f77b4', 'Failure': '#d62728'},
+                opacity=0.7
+            )
+            fig_matrix.update_layout(height=600)
+            st.plotly_chart(fig_matrix, use_container_width=True)
 
             # Split Heatmaps
             st.markdown("### ⚛️ Class-Separated Quantum Kernels")
@@ -594,6 +668,26 @@ with tab2:
             with st.expander("👁️ View Full Numerical Kernel Data"):
                 # Style formatting for readability
                 st.dataframe(df_full_ui.style.format("{:.4f}"))
+
+            # --- NEW OVERALL HEATMAP VISUALIZATION ---
+            st.markdown("### 🗺️ Full Dataset Quantum Kernel Heatmap (Sorted by Class Labels)")
+            st.write("This map plots every sample index against every other sample index. Block structures indicate clustering dominance.")
+
+            fig_global_heatmap = go.Figure(data=go.Heatmap(
+                z=K_sort_ui,
+                x=ui_labels,
+                y=ui_labels,
+                colorscale="Cividis",
+                colorbar=dict(title="Quantum Fidelity")
+            ))
+
+            fig_global_heatmap.update_layout(
+                height=700,
+                xaxis=dict(tickangle=-45, showticklabels=False),  # Hiding raw labels makes large graphs cleaner
+                yaxis=dict(showticklabels=False),
+                margin=dict(l=40, r=40, b=40, t=40)
+                )
+            st.plotly_chart(fig_global_heatmap, use_container_width=True)
 
 # --- TAB 3: QCP ---
 with tab3:
