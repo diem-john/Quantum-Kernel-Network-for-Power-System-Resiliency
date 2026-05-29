@@ -16,7 +16,7 @@ warnings.filterwarnings('ignore')
 # Custom Modules
 from src.mapping import ChiayiMicrogridMapper, QuantumWalkIslandingMapper
 from src.utils import haversine, rankine_vortex, vulnerability_curve
-from src.qkn import QuantumKernelNetwork, QuantumTemporalConvNet
+from src.qkn import QuantumKernelNetwork, QuantumTemporalConvNet, QuantumTemporalConvNet
 from src.qcp import QuantumConformalPredictor
 
 
@@ -187,7 +187,11 @@ with tab1:
 
                     # 7. MATHEMATICAL CORESET DISTILLATION (Solving O(N^2) Scaling)
                     st.toast("Clustering historical data to build Quantum Coresets", icon="⚛️")
+<<<<<<< HEAD
                     target_qpu_budget = 1478
+=======
+                    target_qpu_budget = 600
+>>>>>>> e05d3c511f3e43a1d25d95ab5f2b22454dcd01b9
 
                     if len(df_mapped) > target_qpu_budget:
                         df_fails = df_mapped[df_mapped['Failure_Label'] == 1]
@@ -786,6 +790,7 @@ with tab2:
                                file_name='qkn_full_matrix.csv', mime='text/csv', use_container_width=True)
 
             with st.expander("👁️ View Full Numerical Kernel Data"):
+<<<<<<< HEAD
                 # Calculate total cells in the N x N matrix
                 num_cells = df_full_ui.shape[0] * df_full_ui.shape[1]
 
@@ -798,6 +803,30 @@ with tab2:
                 else:
                     # Render normally for smaller datasets
                     st.dataframe(df_full_ui.style.format("{:.4f}"))
+
+            # --- OVERALL HEATMAP VISUALIZATION ---
+            st.markdown("### 🗺️ Full Dataset Quantum Kernel Heatmap (Sorted by Class Labels)")
+            st.write(
+                "This map plots every sample index against every other sample index. Block structures indicate clustering dominance.")
+
+            fig_global_heatmap = go.Figure(data=go.Heatmap(
+                z=K_sort_ui,
+                x=ui_labels,
+                y=ui_labels,
+                colorscale="Cividis",
+                colorbar=dict(title="Quantum Fidelity")
+            ))
+
+            fig_global_heatmap.update_layout(
+                height=700,
+                xaxis=dict(tickangle=-45, showticklabels=False),
+                yaxis=dict(showticklabels=False),
+                margin=dict(l=40, r=40, b=40, t=40)
+            )
+            st.plotly_chart(fig_global_heatmap, use_container_width=True)
+=======
+                st.dataframe(df_full_ui.style.format("{:.4f}"))
+>>>>>>> e05d3c511f3e43a1d25d95ab5f2b22454dcd01b9
 
             # --- OVERALL HEATMAP VISUALIZATION ---
             st.markdown("### 🗺️ Full Dataset Quantum Kernel Heatmap (Sorted by Class Labels)")
@@ -834,6 +863,7 @@ with tab3:
 
         # 1. Calculate Scores for Visualization
         with st.spinner("Analyzing Calibration Set Surprises..."):
+<<<<<<< HEAD
 
             # --- ENGINE ROUTING: STRICTLY CALIBRATION DATA (X_cal) ---
             if st.session_state.get('pytorch_qcnn_active', False):
@@ -881,6 +911,21 @@ with tab3:
                     )
                     # 2. Extract standard SVM probabilities
                     probs_cal = st.session_state.qkn_model.svm.predict_proba(K_cal)
+=======
+            # Get probabilities from our trained QKN-SVM
+            # scores = 1 - P(true_class)
+            # --- ROUTE PROBABILITIES BASED ON ACTIVE TRAINING ENGINE ---
+            if st.session_state.get('pytorch_qcnn_active', False):
+                # PyTorch's Sigmoid outputs P(Failure). We must reconstruct the 2D array [P(Safe), P(Failure)]
+                p1 = st.session_state.q_predictions.flatten()
+                p0 = 1.0 - p1
+                probs_cal = np.column_stack((p0, p1))  # Stacks them into shape (N, 2)
+            else:
+                # Fallback to standard QSVM classical estimator
+                if hasattr(st.session_state.qkn_model, 'svm'):
+                    # Return the FULL (N, 2) matrix. No slicing!
+                    probs_cal = st.session_state.qkn_model.svm.predict_proba(st.session_state.X_val_filtered)
+>>>>>>> e05d3c511f3e43a1d25d95ab5f2b22454dcd01b9
                 else:
                     st.error("⚠️ Estimator properties missing. Please retrain your choice engine in Phase 2.")
                     st.stop()
@@ -931,7 +976,12 @@ with tab3:
         if st.button("Calculate Threshold (q_hat)"):
             # Using the Universal Conformal Predictor logic we established earlier
             qcp = QuantumConformalPredictor(st.session_state.qkn_model, alpha=(1.0 - target_coverage))
+<<<<<<< HEAD
 
+=======
+            # Note: We pass the pre-calculated scores to the calibrate function if you've modified qcp.py
+            # or let it re-calculate for simplicity.
+>>>>>>> e05d3c511f3e43a1d25d95ab5f2b22454dcd01b9
             q_hat = qcp.calibrate(
                 st.session_state.X_cal,
                 st.session_state.y_cal,
