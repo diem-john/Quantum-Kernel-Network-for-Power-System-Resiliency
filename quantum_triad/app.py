@@ -146,7 +146,11 @@ with tab1:
                         st.stop()
 
                     # 3. GET THE LAST 50 TYPHOONS THAT ACTUALLY HIT TAIWAN
+<<<<<<< HEAD
+                    taiwan_seq_ids = df_tw['seq_id'].unique() # [100:]
+=======
                     taiwan_seq_ids = df_tw['seq_id'].unique()[10:]
+>>>>>>> e05d3c511f3e43a1d25d95ab5f2b22454dcd01b9
                     df_recent_tw = df_tw[df_tw['seq_id'].isin(taiwan_seq_ids)]
 
                     # 4. EXTRACT STRONGEST MOMENTS
@@ -187,7 +191,11 @@ with tab1:
 
                     # 7. MATHEMATICAL CORESET DISTILLATION (Solving O(N^2) Scaling)
                     st.toast("Clustering historical data to build Quantum Coresets", icon="⚛️")
+<<<<<<< HEAD
+                    target_qpu_budget = 1478
+=======
                     target_qpu_budget = 600
+>>>>>>> e05d3c511f3e43a1d25d95ab5f2b22454dcd01b9
 
                     if len(df_mapped) > target_qpu_budget:
                         df_fails = df_mapped[df_mapped['Failure_Label'] == 1]
@@ -786,7 +794,43 @@ with tab2:
                                file_name='qkn_full_matrix.csv', mime='text/csv', use_container_width=True)
 
             with st.expander("👁️ View Full Numerical Kernel Data"):
+<<<<<<< HEAD
+                # Calculate total cells in the N x N matrix
+                num_cells = df_full_ui.shape[0] * df_full_ui.shape[1]
+
+                # Streamlit's default style limit is 262,144 cells
+                if num_cells > 260000:
+                    st.warning(
+                        f"⚠️ Matrix is extremely large ({num_cells:,} cells). HTML styling has been disabled to prevent your browser from crashing. Please use the CSV download for high-precision formatting.")
+                    # Render the raw dataframe without the expensive .style wrapper
+                    st.dataframe(df_full_ui)
+                else:
+                    # Render normally for smaller datasets
+                    st.dataframe(df_full_ui.style.format("{:.4f}"))
+
+            # --- OVERALL HEATMAP VISUALIZATION ---
+            st.markdown("### 🗺️ Full Dataset Quantum Kernel Heatmap (Sorted by Class Labels)")
+            st.write(
+                "This map plots every sample index against every other sample index. Block structures indicate clustering dominance.")
+
+            fig_global_heatmap = go.Figure(data=go.Heatmap(
+                z=K_sort_ui,
+                x=ui_labels,
+                y=ui_labels,
+                colorscale="Cividis",
+                colorbar=dict(title="Quantum Fidelity")
+            ))
+
+            fig_global_heatmap.update_layout(
+                height=700,
+                xaxis=dict(tickangle=-45, showticklabels=False),
+                yaxis=dict(showticklabels=False),
+                margin=dict(l=40, r=40, b=40, t=40)
+            )
+            st.plotly_chart(fig_global_heatmap, use_container_width=True)
+=======
                 st.dataframe(df_full_ui.style.format("{:.4f}"))
+>>>>>>> e05d3c511f3e43a1d25d95ab5f2b22454dcd01b9
 
             # --- OVERALL HEATMAP VISUALIZATION ---
             st.markdown("### 🗺️ Full Dataset Quantum Kernel Heatmap (Sorted by Class Labels)")
@@ -823,6 +867,55 @@ with tab3:
 
         # 1. Calculate Scores for Visualization
         with st.spinner("Analyzing Calibration Set Surprises..."):
+<<<<<<< HEAD
+
+            # --- ENGINE ROUTING: STRICTLY CALIBRATION DATA (X_cal) ---
+            if st.session_state.get('pytorch_qcnn_active', False):
+                import torch
+
+                # 1. Filter features to match the trained bottleneck
+                n_features = st.session_state.qkn_model.n_qubits if hasattr(st.session_state.qkn_model, 'n_qubits') else \
+                st.session_state.X_cal.shape[1]
+                X_cal_filtered = st.session_state.X_cal[:, :n_features]
+
+                # 2. Window synthesis for the PyTorch sequence
+                if len(X_cal_filtered.shape) == 2:
+                    X_seq_cal = np.repeat(X_cal_filtered[:, np.newaxis, :], 4, axis=1)
+                else:
+                    X_seq_cal = X_cal_filtered
+
+                # 3. Extract Quantum Temporal Features
+                if hasattr(st.session_state.qkn_model, 'extract_temporal_quantum_features'):
+                    X_cal_tensor = st.session_state.qkn_model.extract_temporal_quantum_features(X_seq_cal)
+                else:
+                    n_samples, n_steps, _ = X_seq_cal.shape
+                    quantum_features = np.zeros((n_samples, n_steps, n_features))
+                    for step in range(n_steps):
+                        quantum_features[:, step, :] = np.sin(X_seq_cal[:, step, :n_features]) * np.cos(
+                            X_seq_cal[:, step, :n_features])
+                    X_cal_tensor = torch.tensor(quantum_features, dtype=torch.float32).permute(0, 2, 1)
+
+                # 4. Generate Honest Predictions on the Calibration Set
+                st.session_state.pytorch_model.eval()
+                with torch.no_grad():
+                    raw_logits = st.session_state.pytorch_model(X_cal_tensor)
+                    # Apply sigmoid in case the model returns raw logits (BCEWithLogitsLoss setup)
+                    p1_cal = torch.sigmoid(raw_logits).numpy().flatten()
+
+                p0_cal = 1.0 - p1_cal
+                probs_cal = np.column_stack((p0_cal, p1_cal))
+
+            else:
+                # --- RESTORED ORIGINAL QSVM IMPLEMENTATION ---
+                if hasattr(st.session_state.qkn_model, 'svm'):
+                    # 1. Compute the Kernel Matrix cleanly using X_cal vs X_train
+                    K_cal = st.session_state.qkn_model.compute_kernel_matrix(
+                        st.session_state.X_cal,
+                        st.session_state.X_train
+                    )
+                    # 2. Extract standard SVM probabilities
+                    probs_cal = st.session_state.qkn_model.svm.predict_proba(K_cal)
+=======
             # Get probabilities from our trained QKN-SVM
             # scores = 1 - P(true_class)
             # --- ROUTE PROBABILITIES BASED ON ACTIVE TRAINING ENGINE ---
@@ -836,6 +929,7 @@ with tab3:
                 if hasattr(st.session_state.qkn_model, 'svm'):
                     # Return the FULL (N, 2) matrix. No slicing!
                     probs_cal = st.session_state.qkn_model.svm.predict_proba(st.session_state.X_val_filtered)
+>>>>>>> e05d3c511f3e43a1d25d95ab5f2b22454dcd01b9
                 else:
                     st.error("⚠️ Estimator properties missing. Please retrain your choice engine in Phase 2.")
                     st.stop()
@@ -849,6 +943,10 @@ with tab3:
             st.session_state.cal_scores = np.array(cal_scores)
 
         # 2. Plotly Distribution Visualization
+        import pandas as pd
+        import plotly.express as px
+        import numpy as np
+
         df_scores = pd.DataFrame({
             "Non-Conformity Score": st.session_state.cal_scores,
             "Actual Label": ["Failure" if y == 1 else "Safe" for y in st.session_state.y_cal]
@@ -858,7 +956,7 @@ with tab3:
             df_scores,
             x="Non-Conformity Score",
             color="Actual Label",
-            marginal="box",  # Adds a box plot on top
+            marginal="box",
             barmode="overlay",
             color_discrete_map={"Safe": "#1f77b4", "Failure": "#d62728"},
             nbins=30,
@@ -880,9 +978,14 @@ with tab3:
         st.write(f"Adjust the target coverage in the sidebar to recalculate the threshold based on this distribution.")
 
         if st.button("Calculate Threshold (q_hat)"):
+            # Using the Universal Conformal Predictor logic we established earlier
             qcp = QuantumConformalPredictor(st.session_state.qkn_model, alpha=(1.0 - target_coverage))
+<<<<<<< HEAD
+
+=======
             # Note: We pass the pre-calculated scores to the calibrate function if you've modified qcp.py
             # or let it re-calculate for simplicity.
+>>>>>>> e05d3c511f3e43a1d25d95ab5f2b22454dcd01b9
             q_hat = qcp.calibrate(
                 st.session_state.X_cal,
                 st.session_state.y_cal,
